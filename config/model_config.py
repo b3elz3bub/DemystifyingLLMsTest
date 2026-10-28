@@ -25,11 +25,15 @@ class ModelConfig:
     d_ffn: int = field(init=False)
 
     def __post_init__(self):
+        if self.d_model <= 0 or self.n_heads <= 0 or self.n_layers <= 0 or self.vocab_size <= 0:
+            raise ValueError("d_model, n_heads, n_layers, and vocab_size must be positive")
         if self.d_model % self.n_heads != 0:
             raise ValueError(
                 f"d_model ({self.d_model}) must be divisible by n_heads ({self.n_heads})"
             )
         self.d_head = self.d_model // self.n_heads
+        if self.ffn_multiplier <= 0:
+            raise ValueError("ffn_multiplier must be positive")
         self.d_ffn = self.d_model * self.ffn_multiplier
 
     def to_dict(self) -> Dict[str, Any]:

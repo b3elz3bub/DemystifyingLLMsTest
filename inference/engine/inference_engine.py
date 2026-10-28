@@ -97,13 +97,17 @@ class InferenceEngine:
             self.model.eval()
 
         max_tokens = max_new_tokens if max_new_tokens is not None else self.inference_config.max_new_tokens
-        if max_tokens <= 0:
+        if max_tokens < 0:
+            raise ValueError(f"max_new_tokens must be non-negative, got {max_tokens}")
+        if max_tokens == 0:
             if was_training is not None and self.model is not None:
                 self.model.train(was_training)
             return list(prompt_tokens)
 
         temp = temperature if temperature is not None else self.inference_config.temperature
         tokens = list(prompt_tokens)
+        if not tokens:
+            raise ValueError("prompt_tokens must contain at least one token")
 
         # Autoregressive generation loop
         from inference.sampling.sampler import Sampler
