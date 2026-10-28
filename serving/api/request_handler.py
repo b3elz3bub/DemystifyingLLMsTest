@@ -45,7 +45,9 @@ class RequestHandler:
             generated_tokens = self.engine.generate_tokens(
                 prompt_tokens=prompt_tokens,
                 max_new_tokens=max_tokens,
-                temperature=temperature
+                temperature=temperature,
+                top_k=request_body.get("top_k"),
+                top_p=request_body.get("top_p"),
             )
         elif self.engine is not None and hasattr(self.engine, "generate"):
             generated_text = self.engine.generate(prompt, tokenizer=self.tokenizer, max_new_tokens=max_tokens)

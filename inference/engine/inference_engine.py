@@ -5,6 +5,7 @@ High-level inference engine coordinating model execution, caching, and sampling.
 from typing import Optional, List, Union, Any
 import torch
 import torch.nn as nn
+import inspect
 
 from config.model_config import ModelConfig
 from config.inference_config import InferenceConfig
@@ -26,6 +27,7 @@ class FullTransformerModel(nn.Module):
         self.embeddings = EmbeddingLayer(config=config)
         self.blocks = BlockStack(config=config)
         self.lm_head = LMHead(config=config)
+        self.num_layers = config.n_layers
         if config.tie_weights:
             self.lm_head.tie_weights(self.embeddings.token_embedding.embedding.weight)
 
@@ -67,6 +69,8 @@ class InferenceEngine:
             except Exception as e:
                 logger.debug(f"Could not build FullTransformerModel: {e}")
                 self.model = None
+        if self.model is not None and hasattr(self.model, "to"):
+            self.model.to(self.device)
 
     def _prepare_model(self) -> None:
         """
@@ -87,11 +91,14 @@ class InferenceEngine:
         Generate a list of token IDs autoregressively from input token sequence.
         """
         was_training = self.model.training if self.model is not None and hasattr(self.model, "training") else None
+        self._failed = False
         if self.model is not None and hasattr(self.model, "eval"):
             self.model.eval()
 
         max_tokens = max_new_tokens if max_new_tokens is not None else self.inference_config.max_new_tokens
         if max_tokens <= 0:
+            if was_training is not None and self.model is not None:
+                self.model.train(was_training)
             return list(prompt_tokens)
 
         temp = temperature if temperature is not None else self.inference_config.temperature
@@ -99,14 +106,30 @@ class InferenceEngine:
 
         # Autoregressive generation loop
         from inference.sampling.sampler import Sampler
-        sampler = Sampler(temperature=temp, top_k=top_k if top_k is not None else self.inference_config.top_k, top_p=top_p if top_p is not None else self.inference_config.top_p)
+        sampler = Sampler(
+            temperature=temp,
+            top_k=top_k if top_k is not None else self.inference_config.top_k,
+            top_p=top_p if top_p is not None else self.inference_config.top_p,
+            repetition_penalty=self.inference_config.repetition_penalty,
+        )
+        from inference.generation.kv_cache import KVCache
+        use_cache = bool(self.inference_config.use_kv_cache and self.model is not None)
+        if use_cache:
+            try:
+                parameters = inspect.signature(self.model.forward).parameters.values()
+                supports_cache = any(p.name == "kv_cache" or p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters)
+            except (AttributeError, TypeError, ValueError):
+                supports_cache = False
+            use_cache = supports_cache
+        kv_cache = KVCache(getattr(self.model, "num_layers", self.model_config.n_layers)) if use_cache else None
         with torch.inference_mode():
-            for _ in range(max_tokens):
-                input_tensor = torch.tensor([tokens], dtype=torch.long, device=self.device)
+            for step in range(max_tokens):
+                model_tokens = tokens if kv_cache is None or step == 0 else tokens[-1:]
+                input_tensor = torch.tensor([model_tokens], dtype=torch.long, device=self.device)
 
                 if self.model is not None and callable(self.model):
                     try:
-                        logits = self.model(input_tensor)
+                        logits = self.model(input_tensor, kv_cache=kv_cache) if kv_cache is not None else self.model(input_tensor)
                         next_token_logits = logits[:, -1, :]  # (1, vocab_size)
 
                         next_token = sampler.sample(next_token_logits, generated_tokens=tokens).item()
@@ -122,8 +145,8 @@ class InferenceEngine:
                 if next_token in self.inference_config.stop_token_ids:
                     break
 
-        if was_training and self.model is not None:
-            self.model.train()
+        if was_training is not None and self.model is not None:
+            self.model.train(was_training)
         return tokens
 
     def generate(
