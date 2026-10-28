@@ -51,6 +51,8 @@ class RotaryEmbedding(nn.Module):
         self.register_buffer("sin_cached", emb.sin(), persistent=False)
 
     def forward(self, x: torch.Tensor, seq_len: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        if seq_len < 0 or seq_len > self.max_seq_len:
+            raise ValueError(f"Requested rotary sequence length {seq_len} exceeds cache capacity {self.max_seq_len}")
         cos = self.cos_cached[:seq_len, :].to(dtype=x.dtype, device=x.device)
         sin = self.sin_cached[:seq_len, :].to(dtype=x.dtype, device=x.device)
         # Reshape to (1, 1, seq_len, dim) for head broadcasting

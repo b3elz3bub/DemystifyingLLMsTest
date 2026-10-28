@@ -24,11 +24,15 @@ class FullTransformerModel(nn.Module):
         from model.heads import LMHead
 
         self.embeddings = EmbeddingLayer(config=config)
-        self.blocks = BlockStack()
+        self.blocks = BlockStack(config=config)
         self.lm_head = LMHead(config=config)
+        if config.tie_weights:
+            self.lm_head.tie_weights(self.embeddings.token_embedding.embedding.weight)
 
     def forward(self, input_ids: torch.Tensor, **kwargs) -> torch.Tensor:
-        h = self.embeddings(input_ids)
+        cache = kwargs.get("kv_cache")
+        offset = cache.get_seq_length(0) if cache is not None else 0
+        h = self.embeddings(input_ids, offset=offset)
         h = self.blocks(h, **kwargs)
         logits = self.lm_head(h)
         return logits
@@ -82,7 +86,9 @@ class InferenceEngine:
         """
         Generate a list of token IDs autoregressively from input token sequence.
         """
-        self._prepare_model()
+        was_training = self.model.training if self.model is not None and hasattr(self.model, "training") else None
+        if self.model is not None and hasattr(self.model, "eval"):
+            self.model.eval()
 
         max_tokens = max_new_tokens if max_new_tokens is not None else self.inference_config.max_new_tokens
         if max_tokens <= 0:
@@ -92,7 +98,9 @@ class InferenceEngine:
         tokens = list(prompt_tokens)
 
         # Autoregressive generation loop
-        with torch.no_grad():
+        from inference.sampling.sampler import Sampler
+        sampler = Sampler(temperature=temp, top_k=top_k if top_k is not None else self.inference_config.top_k, top_p=top_p if top_p is not None else self.inference_config.top_p)
+        with torch.inference_mode():
             for _ in range(max_tokens):
                 input_tensor = torch.tensor([tokens], dtype=torch.long, device=self.device)
 
@@ -101,11 +109,7 @@ class InferenceEngine:
                         logits = self.model(input_tensor)
                         next_token_logits = logits[:, -1, :]  # (1, vocab_size)
 
-                        if temp > 0:
-                            probs = torch.softmax(next_token_logits / temp, dim=-1)
-                            next_token = torch.multinomial(probs, num_samples=1).item()
-                        else:
-                            next_token = torch.argmax(next_token_logits, dim=-1).item()
+                        next_token = sampler.sample(next_token_logits, generated_tokens=tokens).item()
                     except Exception:
                         self._failed = True
                         next_token = (tokens[-1] + 1) % self.model_config.vocab_size
@@ -118,6 +122,8 @@ class InferenceEngine:
                 if next_token in self.inference_config.stop_token_ids:
                     break
 
+        if was_training and self.model is not None:
+            self.model.train()
         return tokens
 
     def generate(
