@@ -51,6 +51,8 @@ class RequestHandler:
             )
         elif self.engine is not None and hasattr(self.engine, "generate"):
             generated_text = self.engine.generate(prompt, tokenizer=self.tokenizer, max_new_tokens=max_tokens)
+            if isinstance(generated_text, str) and generated_text.startswith(prompt):
+                generated_text = generated_text[len(prompt):]
             generated_tokens = prompt_tokens
         else:
             generated_tokens = prompt_tokens + [prompt_tokens[-1] + 1 if prompt_tokens else 42]

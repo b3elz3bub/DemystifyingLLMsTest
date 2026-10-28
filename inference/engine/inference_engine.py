@@ -59,6 +59,7 @@ class InferenceEngine:
             self.model_config = ModelConfig(d_model=768, vocab_size=50257)
 
         self.inference_config = inference_config or InferenceConfig()
+        self.inference_config.validate()
         self.device = torch.device(device) if device else torch.device("cpu")
 
         if model is not None:
@@ -76,8 +77,8 @@ class InferenceEngine:
         """
         Internal lifecycle helper to prepare model state before inference execution.
         """
-        if self.model is not None and hasattr(self.model, "train"):
-            self.model.train()
+        if self.model is not None and hasattr(self.model, "eval"):
+            self.model.eval()
 
     def generate_tokens(
         self,
@@ -128,17 +129,14 @@ class InferenceEngine:
                 input_tensor = torch.tensor([model_tokens], dtype=torch.long, device=self.device)
 
                 if self.model is not None and callable(self.model):
-                    try:
-                        logits = self.model(input_tensor, kv_cache=kv_cache) if kv_cache is not None else self.model(input_tensor)
-                        next_token_logits = logits[:, -1, :]  # (1, vocab_size)
-
-                        next_token = sampler.sample(next_token_logits, generated_tokens=tokens).item()
-                    except Exception:
-                        self._failed = True
-                        next_token = (tokens[-1] + 1) % self.model_config.vocab_size
+                    logits = self.model(input_tensor, kv_cache=kv_cache) if kv_cache is not None else self.model(input_tensor)
+                    if isinstance(logits, tuple):
+                        logits = logits[0]
+                    next_token_logits = logits[:, -1, :]
+                    next_token = sampler.sample(next_token_logits, generated_tokens=tokens).item()
                 else:
                     self._failed = True
-                    next_token = (tokens[-1] + 1) % self.model_config.vocab_size
+                    raise RuntimeError("No callable model is available for token generation")
 
                 tokens.append(int(next_token))
 
@@ -164,12 +162,9 @@ class InferenceEngine:
 
         # Tokenize prompt
         if tokenizer is not None and hasattr(tokenizer, "encode"):
-            try:
-                prompt_ids = tokenizer.encode(prompt)
-            except Exception:
-                prompt_ids = [ord(c) for c in prompt]
+            prompt_ids = tokenizer.encode(prompt)
         else:
-            prompt_ids = [ord(c) for c in prompt]
+            raise ValueError("A tokenizer with an encode method is required")
 
         # Generate tokens
         output_ids = self.generate_tokens(
@@ -180,11 +175,6 @@ class InferenceEngine:
 
         # Decode generated tokens
         if not getattr(self, "_failed", False) and tokenizer is not None and hasattr(tokenizer, "decode"):
-            try:
-                return tokenizer.decode(output_ids)
-            except Exception:
-                pass
+            return tokenizer.decode(output_ids)
 
-        # Fallback decode: append dummy synthesized continuation
-        continuation = " [generated continuation tokens]"
-        return prompt + continuation
+        raise RuntimeError("Unable to decode generated token IDs with the provided tokenizer")

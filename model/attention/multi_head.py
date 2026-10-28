@@ -105,8 +105,7 @@ class MultiHeadAttention(nn.Module):
 
         past_len = kv_cache.get_seq_length(layer_idx) if kv_cache is not None and layer_idx is not None else 0
         if self.rotary_emb is not None:
-            cos, sin = self.rotary_emb(q, past_len + seq_len)
-            cos, sin = cos[..., past_len:past_len + seq_len, :], sin[..., past_len:past_len + seq_len, :]
+            cos, sin = self.rotary_emb(q, seq_len=seq_len, offset=past_len)
             q, k = apply_rotary_pos_emb(q, k, cos, sin)
 
         # 3. Update KV cache if provided

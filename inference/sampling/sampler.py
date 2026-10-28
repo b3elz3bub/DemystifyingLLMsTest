@@ -2,7 +2,6 @@
 import torch
 import torch.nn.functional as F
 from typing import Optional, List, Union
-from .temperature import apply_temperature
 from .top_k import apply_top_k
 from .top_p import apply_top_p
 from .repetition_penalty import apply_repetition_penalty
@@ -37,7 +36,9 @@ class Sampler:
         if self.repetition_penalty != 1.0 and generated_tokens is not None:
             logits = apply_repetition_penalty(logits, generated_tokens, penalty=self.repetition_penalty)
 
-        logits = apply_temperature(logits, self.temperature)
+        if self.temperature <= 0:
+            raise ValueError("temperature must be positive")
+        logits = logits / self.temperature
 
         # 2. Top-K
         if self.top_k > 0:

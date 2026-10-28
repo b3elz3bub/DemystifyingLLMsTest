@@ -35,11 +35,15 @@ class BPETokenizer:
         if len(pieces) <= 1:
             return pieces
 
-        # Apply merges in priority order (as given, not alphabetical)
-        ordered_merges = self.merges
-
-        for pair in ordered_merges:
-            if len(pieces) <= 1:
+        merge_ranks = {pair: rank for rank, pair in enumerate(self.merges)}
+        while len(pieces) > 1:
+            available = self._get_stats(pieces)
+            pair = min(
+                (candidate for candidate in available if candidate in merge_ranks),
+                key=merge_ranks.__getitem__,
+                default=None,
+            )
+            if pair is None:
                 break
             pieces = self._merge_word(pieces, pair)
 

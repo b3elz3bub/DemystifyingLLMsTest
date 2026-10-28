@@ -22,6 +22,10 @@ def create_causal_mask(
 
     future positions are masked with -inf.
     """
+    if seq_len < 0:
+        raise ValueError(f"seq_len must be non-negative, got {seq_len}")
+    if not dtype.is_floating_point:
+        raise TypeError(f"causal mask dtype must be floating point, got {dtype}")
     mask = torch.triu(
         torch.full((seq_len, seq_len), float("-inf"), device=device, dtype=dtype),
         diagonal=1

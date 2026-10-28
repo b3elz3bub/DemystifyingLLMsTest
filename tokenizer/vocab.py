@@ -7,6 +7,7 @@ class Vocabulary:
     def __init__(self, vocab_dict: Optional[Dict[str, int]] = None):
         self._token_to_id: Dict[str, int] = {}
         self._id_to_token: Dict[int, str] = {}
+        self._next_id = 2
         
         self.pad_token_id: int = 0
         self.unk_token_id: int = 1
@@ -25,7 +26,12 @@ class Vocabulary:
         if token in self._token_to_id:
             return self._token_to_id[token]
         if idx is None:
-            idx = len(self._token_to_id)
+            while self._next_id in self._id_to_token:
+                self._next_id += 1
+            idx = self._next_id
+            self._next_id += 1
+        if idx in self._id_to_token:
+            raise ValueError(f"token ID {idx} is already assigned to {self._id_to_token[idx]!r}")
         self._token_to_id[token] = idx
         self._id_to_token[idx] = token
         return idx
@@ -45,3 +51,7 @@ class Vocabulary:
 
     def __contains__(self, token: str) -> bool:
         return token in self._token_to_id
+
+
+# Module-level encode/decode helpers share a vocabulary for ID round trips.
+DEFAULT_VOCAB = Vocabulary()
